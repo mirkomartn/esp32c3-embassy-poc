@@ -6,10 +6,16 @@ use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal::{
-    clock::ClockControl, peripherals::Peripherals, prelude::*, system::SystemControl,
+    clock::ClockControl,
+    gpio::{Gpio9, Input, Io, Pull},
+    peripherals::Peripherals,
+    prelude::*,
+    system::SystemControl,
     timer::timg::TimerGroup,
 };
 use esp_println::println;
+
+type BOOT = Input<'static, Gpio9>;
 
 struct Tsens {
     tsens_reg: esp32c3::APB_SARADC,
@@ -54,7 +60,11 @@ async fn main(spawner: Spawner) {
     let timg0 = TimerGroup::new_async(peripherals.TIMG0, &clocks);
     esp_hal_embassy::init(&clocks, timg0);
 
+    let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
+    let but = Input::new(io.pins.gpio9, Pull::Up);
+
     spawner.spawn(tsens()).ok();
+    spawner.spawn(button(but)).ok();
 
     loop {
         println!("Hello World");
@@ -70,5 +80,13 @@ async fn tsens() {
     loop {
         println!("Temp: {}", tsens.tsens_reg.tsens_ctrl().read().out().bits());
         Timer::after(Duration::from_millis(2_000)).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn button(mut button: BOOT) {
+    loop {
+        button.wait_for_rising_edge().await;
+        println!("Zdravo Gasper!");
     }
 }
