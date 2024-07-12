@@ -7,7 +7,7 @@ use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal::{
     clock::ClockControl,
-    gpio::{Gpio9, Input, Io, Pull},
+    gpio::{AnyInput, Io, Pull},
     peripherals::Peripherals,
     prelude::*,
     system::SystemControl,
@@ -15,57 +15,29 @@ use esp_hal::{
 };
 use esp_println::println;
 
-type BOOT = Input<'static, Gpio9>;
-
-struct Tsens {
-    tsens_reg: esp32c3::APB_SARADC,
-    sys_reg: esp32c3::SYSTEM,
-}
-
-impl Tsens {
-    fn new() -> Self {
-        let tsens = Self {
-            tsens_reg: unsafe { esp32c3::APB_SARADC::steal() },
-            sys_reg: unsafe { esp32c3::SYSTEM::steal() },
-        };
-        tsens.tsens_reg.tsens_ctrl().write(|w| w.pu().set_bit());
-        tsens
-            .sys_reg
-            .perip_clk_en1()
-            .write(|w| w.tsens_clk_en().set_bit());
-        // Select XTAL_CLK (default as per C idf source)
-        tsens
-            .tsens_reg
-            .tsens_ctrl2()
-            .write(|w| w.clk_sel().set_bit());
-        tsens
-    }
-}
-
-impl Drop for Tsens {
-    fn drop(&mut self) {
-        self.tsens_reg.tsens_ctrl().write(|w| w.pu().clear_bit());
-        self.sys_reg
-            .perip_clk_en1()
-            .write(|w| w.tsens_clk_en().clear_bit());
-    }
-}
+mod button;
+mod tsens;
 
 #[main]
 async fn main(spawner: Spawner) {
+    // General setup/default configuration of the board
     let peripherals = Peripherals::take();
     let system = SystemControl::new(peripherals.SYSTEM);
     let clocks = ClockControl::boot_defaults(system.clock_control).freeze();
-
     let timg0 = TimerGroup::new_async(peripherals.TIMG0, &clocks);
     esp_hal_embassy::init(&clocks, timg0);
 
+    // Use GPIO9 (BOOT button) for user input
     let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
-    let but = Input::new(io.pins.gpio9, Pull::Up);
+    let but = AnyInput::new(io.pins.gpio9, Pull::Up);
+    let but = button::Button::new(but);
 
+    // Periodically measure temperature
     spawner.spawn(tsens()).ok();
-    spawner.spawn(button(but)).ok();
+    // Wait for user to press the button
+    spawner.spawn(button_press(but)).ok();
 
+    // Main is an embassy task as well, might as well use it
     loop {
         println!("Hello World");
         Timer::after(Duration::from_millis(5_000)).await;
@@ -74,19 +46,21 @@ async fn main(spawner: Spawner) {
 
 #[embassy_executor::task]
 async fn tsens() {
-    let tsens = Tsens::new();
+    // Create new Tsens struct which will initialize the sensor
+    let tsens = tsens::Tsens::new();
+    // Recommended time for the sensor to settle (as per C idf source)
     Timer::after(Duration::from_micros(300)).await;
 
     loop {
-        println!("Temp: {}", tsens.tsens_reg.tsens_ctrl().read().out().bits());
+        println!("Temp: {}", tsens.get_temp());
         Timer::after(Duration::from_millis(2_000)).await;
     }
 }
 
 #[embassy_executor::task]
-async fn button(mut button: BOOT) {
+async fn button_press(mut button: button::Button) {
     loop {
-        button.wait_for_rising_edge().await;
+        button.wait().await;
         println!("Zdravo Gasper!");
     }
 }
