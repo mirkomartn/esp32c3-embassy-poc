@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 embassy-executor = { version = "0.5.0", features = ["integrated-timers"] }
+embassy-net = { version = "0.4.0", features = ["proto-ipv4", "medium-ethernet", "tcp", "dhcpv4" ]  }
 embassy-time = { version = "0.3.0" }
 embassy-time-driver = { version = "0.1.0" }
 esp-backtrace = { version = "0.12.1", features = [
@@ -16,7 +17,9 @@ esp-backtrace = { version = "0.12.1", features = [
 esp-hal = { version = "0.18.0", features = ["esp32c3", "embedded-hal", "async"] }
 esp-hal-embassy = { version = "0.1.0", features = ["esp32c3", "time-timg0"] }
 esp-println = { version = "0.9.1", features = ["esp32c3", "uart"] }
+esp-wifi = {version = "0.6.0", features = ["esp32c3", "async", "embassy-net", "wifi-default", "wifi", "utils", "ipv4"] } 
 esp32c3 = "0.23.0"
+static_cell = { version = "2.1.0", features = ["nightly"] }
 
 [profile.release]
 codegen-units    = 1
