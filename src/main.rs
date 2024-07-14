@@ -8,7 +8,6 @@ use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal::{
     clock::ClockControl,
-    gpio::{AnyInput, Io, Pull},
     peripherals::Peripherals,
     prelude::*,
     rng::Rng,
@@ -16,27 +15,14 @@ use esp_hal::{
     timer::{systimer::SystemTimer, timg::TimerGroup},
 };
 use esp_println::println;
-use esp_wifi::{
-    initialize,
-    wifi::{
-        ClientConfiguration, Configuration, WifiController, WifiDevice, WifiEvent, WifiStaDevice,
-        WifiState,
-    },
-    EspWifiInitFor,
-};
-// use static_cell::make_static;
 
-mod button;
+mod boot_btn;
 mod tsens;
+mod wifi;
 
-const SSID: &str = core::env!("SSID");
-const PASSWORD: &str = core::env!("PASSWORD");
-
+// recast a reference to T to a reference to static T
+#[inline]
 unsafe fn make_static<T>(t: &T) -> &'static T {
-    core::mem::transmute(t)
-}
-
-unsafe fn make_static_mut<T>(t: &mut T) -> &'static mut T {
     core::mem::transmute(t)
 }
 
@@ -44,10 +30,13 @@ macro_rules! mk_static {
     ($t:ty,$val:expr) => {{
         static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
         #[deny(unused_attributes)]
-        let x = STATIC_CELL.uninit().write(($val));
+        let x = STATIC_CELL.init(($val)); // uninit().write(($val));
         x
     }};
 }
+
+// make mk_static! macro available to all modules of the crate
+pub(crate) use mk_static;
 
 #[main]
 async fn main(spawner: Spawner) {
@@ -57,143 +46,25 @@ async fn main(spawner: Spawner) {
     let clocks = ClockControl::max(system.clock_control).freeze();
     let timg0 = TimerGroup::new_async(peripherals.TIMG0, &clocks);
 
-    let init = initialize(
-        EspWifiInitFor::Wifi,
-        SystemTimer::new(peripherals.SYSTIMER).alarm0,
-        Rng::new(peripherals.RNG),
-        peripherals.RADIO_CLK,
-        &clocks,
-    )
-    .expect("Failed to initialize Wifi");
-
     esp_hal_embassy::init(&clocks, timg0);
 
-    let wifi = peripherals.WIFI;
-    let (wifi_interface, controller) =
-        esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice).unwrap();
+    // setup boot button handler
+    // TODO: pass a Fn to be called on event
+    boot_btn::start(&spawner);
 
-    let config = Config::dhcpv4(Default::default());
-    let seed = 1234;
+    let tsens = tsens::new();
+    let _wifi_link = wifi::WifiLink::new(
+        &spawner,
+        peripherals.SYSTIMER,
+        peripherals.RNG,
+        peripherals.RADIO_CLK,
+        unsafe { make_static(&clocks) },
+        peripherals.WIFI,
+    )
+    .await;
 
-    // let mut stack_res = StackResources::<3>::new();
-    // let stack = unsafe {
-    //     let stack = Stack::new(
-    //         wifi_interface,
-    //         config,
-    //         make_static_mut(&mut stack_res),
-    //         seed,
-    //     );
-    //     &*make_static(&stack)
-    // };
-
-    let stack = &*mk_static!(
-        Stack<WifiDevice<'_, WifiStaDevice>>,
-        Stack::new(
-            wifi_interface,
-            config,
-            mk_static!(StackResources<3>, StackResources::<3>::new()),
-            seed
-        )
-    );
-
-    spawner.spawn(connection(controller)).ok();
-    spawner.spawn(net_task(&stack)).ok();
-
-    let mut rx_buffer = [0; 4096];
-    let mut tx_buffer = [0; 4096];
-
-    //wait until wifi connected
     loop {
-        if stack.is_link_up() {
-            break;
-        }
-        Timer::after(Duration::from_millis(500)).await;
-    }
-
-    println!("Waiting to get IP address...");
-    loop {
-        if let Some(config) = stack.config_v4() {
-            println!("Got IP: {}", config.address); //dhcp IP address
-            break;
-        }
-        Timer::after(Duration::from_millis(500)).await;
-    }
-
-    // Use GPIO9 (BOOT button) for user input
-    let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
-    let but = AnyInput::new(io.pins.gpio9, Pull::Up);
-    let but = button::Button::new(but);
-
-    // Periodically measure temperature
-    spawner.spawn(tsens()).ok();
-    // Wait for user to press the button
-    spawner.spawn(button_press(but)).ok();
-
-    // Main is an embassy task as well, might as well use it
-    loop {
-        println!("Hello World");
+        println!("Temperature == {}", tsens.get_temp());
         Timer::after(Duration::from_millis(5_000)).await;
     }
-}
-
-#[embassy_executor::task]
-async fn tsens() {
-    // Create new Tsens struct which will initialize the sensor
-    let tsens = tsens::Tsens::new();
-    // Recommended time for the sensor to settle (as per C idf source)
-    Timer::after(Duration::from_micros(300)).await;
-
-    loop {
-        println!("Temp: {}", tsens.get_temp());
-        Timer::after(Duration::from_millis(2_000)).await;
-    }
-}
-
-#[embassy_executor::task]
-async fn button_press(mut button: button::Button) {
-    loop {
-        button.wait().await;
-        println!("Zdravo Gasper!");
-    }
-}
-
-#[embassy_executor::task]
-async fn connection(mut controller: WifiController<'static>) {
-    println!("start connection task");
-    println!("Device capabilities: {:?}", controller.get_capabilities());
-    loop {
-        match esp_wifi::wifi::get_wifi_state() {
-            WifiState::StaConnected => {
-                // wait until we're no longer connected
-                controller.wait_for_event(WifiEvent::StaDisconnected).await;
-                Timer::after(Duration::from_millis(5000)).await
-            }
-            _ => {}
-        }
-        if !matches!(controller.is_started(), Ok(true)) {
-            let client_config = Configuration::Client(ClientConfiguration {
-                ssid: SSID.try_into().unwrap(),
-                password: PASSWORD.try_into().unwrap(),
-                ..Default::default()
-            });
-            controller.set_configuration(&client_config).unwrap();
-            println!("Starting wifi");
-            controller.start().await.unwrap();
-            println!("Wifi started!");
-        }
-        println!("About to connect...");
-
-        match controller.connect().await {
-            Ok(_) => println!("Wifi connected!"),
-            Err(e) => {
-                println!("Failed to connect to wifi: {e:?}");
-                Timer::after(Duration::from_millis(5000)).await
-            }
-        }
-    }
-}
-
-#[embassy_executor::task]
-async fn net_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
-    stack.run().await
 }

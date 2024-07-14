@@ -1,10 +1,12 @@
+use crate::*;
+
 pub struct Tsens {
     tsens_reg: esp32c3::APB_SARADC,
     sys_reg: esp32c3::SYSTEM,
 }
 
 impl Tsens {
-    pub fn new() -> Self {
+    fn new() -> Self {
         let tsens = Self {
             tsens_reg: unsafe { esp32c3::APB_SARADC::steal() },
             sys_reg: unsafe { esp32c3::SYSTEM::steal() },
@@ -28,9 +30,10 @@ impl Tsens {
         tsens
     }
 
-    pub fn get_temp(&self) -> u8 {
+    pub fn get_temp(&self) -> f32 {
         // get the reading of the sensor
-        self.tsens_reg.tsens_ctrl().read().out().bits()
+        let t = self.tsens_reg.tsens_ctrl().read().out().bits();
+        ((t as f32) * 0.4386) - 20.52
     }
 }
 
@@ -42,4 +45,8 @@ impl Drop for Tsens {
             .perip_clk_en1()
             .write(|w| w.tsens_clk_en().clear_bit());
     }
+}
+
+pub fn new() -> Tsens {
+    Tsens::new()
 }
