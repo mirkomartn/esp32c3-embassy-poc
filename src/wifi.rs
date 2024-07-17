@@ -39,7 +39,11 @@ impl WifiLink {
             esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice).unwrap();
 
         let config = Config::dhcpv4(Default::default());
-        let seed = 8888; // TODO
+        // the seed doesn't need to be cryptographically secure, it's used for
+        // randomization of TCP port/initial sequence number, which helps prevent
+        // collisions between sessions across *reboots*, which are quite unlikely
+        // even if we're using a constant for a seed
+        let seed = 8888;
 
         let stack = &*mk_static!(
             Stack<WifiDevice<'_, WifiStaDevice>>,
@@ -51,33 +55,32 @@ impl WifiLink {
             )
         );
 
+        // Both tasks execute indefinitely, so they need to run in
+        // background tasks. First one (`connection`) establishes
+        // an L2 link and upon link break-down waits a bit and then
+        // tries to re-establish it. Second one (`net_task`) runs
+        // a network-loop, processing all networking related-events.
         spawner.spawn(connection(controller)).ok();
         spawner.spawn(net_task(&stack)).ok();
 
-        //wait until wifi is connected
-        while !stack.is_link_up() {
-            Timer::after(Duration::from_millis(500)).await;
-        }
-
-        loop {
-            if let Some(config) = stack.config_v4() {
-                println!("Got IP: {}", config.address); //dhcp IP address
-                break;
-            }
-            Timer::after(Duration::from_millis(500)).await;
-        }
+        // wait for the stack to obtain a valid IP configuration
+        // TODO: wrap this into select! together with a timeout
+        // and handle failure
+        stack.wait_config_up().await;
 
         Self { stack: Some(stack) }
     }
 }
 
+// Establish a persistent L2 connection. Upon failure/break-down, wait and retry.
 #[embassy_executor::task]
 async fn connection(mut controller: WifiController<'static>) {
-    // println!("Device capabilities: {:?}", controller.get_capabilities());
     loop {
         match esp_wifi::wifi::get_wifi_state() {
             WifiState::StaConnected => {
                 // wait until we're no longer connected and attempt to reconnect after 5 sec
+                // as long as we're connected, this task will be parked at this await point
+                // and will not consume any resources
                 controller.wait_for_event(WifiEvent::StaDisconnected).await;
                 Timer::after(Duration::from_millis(5000)).await
             }
@@ -90,14 +93,11 @@ async fn connection(mut controller: WifiController<'static>) {
                 ..Default::default()
             });
             controller.set_configuration(&client_config).unwrap();
-            println!("Starting wifi");
             controller.start().await.unwrap();
-            println!("Wifi started!");
         }
-        println!("About to connect...");
 
         match controller.connect().await {
-            Ok(_) => println!("Wifi connected!"),
+            Ok(_) => (),
             Err(e) => {
                 println!("Failed to connect to wifi: {e:?}");
                 Timer::after(Duration::from_millis(5000)).await
@@ -106,6 +106,8 @@ async fn connection(mut controller: WifiController<'static>) {
     }
 }
 
+// This is a diverging function, so it must be run on a separate task in
+// the background. It runs the network stack, processing network events.
 #[embassy_executor::task]
 async fn net_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
     stack.run().await
