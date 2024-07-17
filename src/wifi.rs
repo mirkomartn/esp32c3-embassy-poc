@@ -8,6 +8,7 @@ use esp_wifi::{
     },
     EspWifiInitFor,
 };
+use static_cell::StaticCell;
 
 const SSID: &str = core::env!("SSID");
 const PASSWORD: &str = core::env!("PASSWORD");
@@ -45,15 +46,15 @@ impl WifiLink {
         // even if we're using a constant for a seed
         let seed = 8888;
 
-        let stack = &*mk_static!(
-            Stack<WifiDevice<'_, WifiStaDevice>>,
-            Stack::new(
-                wifi_interface,
-                config,
-                mk_static!(StackResources<3>, StackResources::<3>::new()),
-                seed
-            )
-        );
+        static RESOURCES: StaticCell<StackResources<2>> = StaticCell::new();
+        static STACK: StaticCell<Stack<WifiDevice<'_, WifiStaDevice>>> = StaticCell::new();
+        // StaticCell::init() will return a &'static mut, which we then recast to &'static, because we only need a runtime initialization of a static variable, but don't require a mutable reference (in fact this might be problematic with a borrow checker)
+        let stack = &*STACK.init(Stack::new(
+            wifi_interface,
+            config,
+            RESOURCES.init(StackResources::new()),
+            seed,
+        ));
 
         // Both tasks execute indefinitely, so they need to run in
         // background tasks. First one (`connection`) establishes
