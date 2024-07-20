@@ -29,6 +29,7 @@ async fn main(spawner: Spawner) {
     let timg0 = TimerGroup::new_async(peripherals.TIMG0, &clocks);
 
     esp_hal_embassy::init(&clocks, timg0);
+    let _ = esp_hal::gpio::Io::new(peripherals.GPIO, peripherals.IO_MUX);
 
     // setup boot button handler
     boot_btn::start(&spawner, || println!("Hello button closure"));
