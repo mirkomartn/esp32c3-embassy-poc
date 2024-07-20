@@ -37,8 +37,7 @@ async fn main(spawner: Spawner) {
     esp_hal_embassy::init(&clocks, timg0);
 
     // setup boot button handler
-    // TODO: pass a Fn to be called on event
-    boot_btn::start(&spawner);
+    boot_btn::start(&spawner, || println!("Hello button closure"));
 
     let tsens = tsens::new();
     let _wifi_link = wifi::WifiLink::new(
