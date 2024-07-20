@@ -1,5 +1,6 @@
 use crate::*;
 
+use embassy_net::DhcpConfig;
 use esp_wifi::wifi::{WifiDevice, WifiStaDevice};
 use static_cell::StaticCell;
 
@@ -17,7 +18,7 @@ impl NetStack {
         // even if we're using a constant for a seed
         let seed = 8888;
 
-        static RESOURCES: StaticCell<StackResources<2>> = StaticCell::new();
+        static RESOURCES: StaticCell<StackResources<4>> = StaticCell::new();
         static STACK: StaticCell<Stack<WifiDevice<'_, WifiStaDevice>>> = StaticCell::new();
         // StaticCell::init() will return a &'static mut, which we then recast to &'static, because we only need a runtime initialization of a static variable, but don't require a mutable reference (in fact this might be problematic with a borrow checker)
         let stack = &*STACK.init(Stack::new(
@@ -36,7 +37,41 @@ impl NetStack {
         // and handle failure
         stack.wait_config_up().await;
 
+        // println!("Config: {:?}", stack.config_v4().unwrap());
+
         Self { stack }
+    }
+
+    // Get a TCP socket
+    pub fn get_tcp_socket<'a>(
+        &self,
+        rx_buffer: &'a mut [u8],
+        tx_buffer: &'a mut [u8],
+    ) -> TcpSocket<'a> {
+        let mut socket = TcpSocket::new(&self.stack, rx_buffer, tx_buffer);
+
+        socket.set_timeout(Some(embassy_time::Duration::from_secs(10)));
+
+        socket
+    }
+
+    // Connect a TCP socket to given address and port
+    pub async fn connect_socket<'a>(
+        &self,
+        socket: &mut TcpSocket<'a>,
+        addr: &str,
+        port: u16,
+    ) -> Option<()> {
+        let endpoint = (
+            self.stack
+                .dns_query(addr, embassy_net::dns::DnsQueryType::A)
+                .await
+                .map(|a| a[0])
+                .unwrap(),
+            port,
+        );
+
+        socket.connect(endpoint).await.ok()
     }
 }
 

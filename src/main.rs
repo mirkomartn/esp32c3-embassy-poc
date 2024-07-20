@@ -36,6 +36,7 @@ async fn main(spawner: Spawner) {
     boot_btn::start(&spawner, || println!("Hello button closure"));
 
     let tsens = tsens::Tsens::new().await;
+
     let mut wifi_link = wifi::WifiLink::new(
         &spawner,
         peripherals.SYSTIMER,
@@ -47,6 +48,15 @@ async fn main(spawner: Spawner) {
     .await;
 
     let netstack = netstack::NetStack::new(&spawner, wifi_link.take().unwrap()).await;
+
+    let mut rx_buffer = [0; 1024];
+    let mut tx_buffer = [0; 1024];
+
+    let mut socket = netstack.get_tcp_socket(&mut rx_buffer, &mut tx_buffer);
+
+    netstack
+        .connect_socket(&mut socket, "broker.hivemq.com", 1883)
+        .await;
 
     loop {
         println!("Temperature == {}", tsens.get_temp());
