@@ -49,8 +49,8 @@ async fn main(spawner: Spawner) {
 
     let netstack = netstack::NetStack::new(&spawner, wifi_link.take().unwrap()).await;
 
-    let mut rx_buffer = [0; 1024];
-    let mut tx_buffer = [0; 1024];
+    let mut rx_buffer = [0; 4096];
+    let mut tx_buffer = [0; 4096];
 
     let mut socket = netstack.get_tcp_socket(&mut rx_buffer, &mut tx_buffer);
 
