@@ -20,12 +20,6 @@ mod boot_btn;
 mod tsens;
 mod wifi;
 
-// recast a reference to T to a reference to static T
-#[inline]
-unsafe fn make_static<T>(t: &T) -> &'static T {
-    core::mem::transmute(t)
-}
-
 #[main]
 async fn main(spawner: Spawner) {
     // General setup/default configuration of the board
@@ -45,7 +39,7 @@ async fn main(spawner: Spawner) {
         peripherals.SYSTIMER,
         peripherals.RNG,
         peripherals.RADIO_CLK,
-        unsafe { make_static(&clocks) },
+        &clocks,
         peripherals.WIFI,
     )
     .await;

@@ -24,7 +24,7 @@ impl WifiLink {
         systimer: esp_hal::peripherals::SYSTIMER,
         rng: esp_hal::peripherals::RNG,
         rclock: esp_hal::peripherals::RADIO_CLK,
-        clocks: &'static esp_hal::clock::Clocks<'static>,
+        clocks: &esp_hal::clock::Clocks<'_>,
         wifi: esp_hal::peripherals::WIFI,
     ) -> Self {
         let init = initialize(
