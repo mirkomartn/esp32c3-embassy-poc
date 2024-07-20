@@ -17,6 +17,7 @@ use esp_hal::{
 use esp_println::println;
 
 mod boot_btn;
+mod netstack;
 mod tsens;
 mod wifi;
 
@@ -35,7 +36,7 @@ async fn main(spawner: Spawner) {
     boot_btn::start(&spawner, || println!("Hello button closure"));
 
     let tsens = tsens::Tsens::new().await;
-    let _wifi_link = wifi::WifiLink::new(
+    let mut wifi_link = wifi::WifiLink::new(
         &spawner,
         peripherals.SYSTIMER,
         peripherals.RNG,
@@ -44,6 +45,8 @@ async fn main(spawner: Spawner) {
         peripherals.WIFI,
     )
     .await;
+
+    let netstack = netstack::NetStack::new(&spawner, wifi_link.take().unwrap()).await;
 
     loop {
         println!("Temperature == {}", tsens.get_temp());

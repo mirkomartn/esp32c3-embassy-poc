@@ -8,13 +8,12 @@ use esp_wifi::{
     },
     EspWifiInitFor,
 };
-use static_cell::StaticCell;
 
 const SSID: &str = core::env!("SSID");
 const PASSWORD: &str = core::env!("PASSWORD");
 
 pub struct WifiLink {
-    stack: Option<&'static Stack<WifiDevice<'static, WifiStaDevice>>>,
+    interface: Option<WifiDevice<'static, WifiStaDevice>>,
 }
 
 // TODO: use a typestate pattern
@@ -36,40 +35,20 @@ impl WifiLink {
         )
         .expect("Failed to initialize Wifi");
 
-        let (wifi_interface, controller) =
+        let (interface, controller) =
             esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice).unwrap();
 
-        let config = Config::dhcpv4(Default::default());
-        // the seed doesn't need to be cryptographically secure, it's used for
-        // randomization of TCP port/initial sequence number, which helps prevent
-        // collisions between sessions across *reboots*, which are quite unlikely
-        // even if we're using a constant for a seed
-        let seed = 8888;
-
-        static RESOURCES: StaticCell<StackResources<2>> = StaticCell::new();
-        static STACK: StaticCell<Stack<WifiDevice<'_, WifiStaDevice>>> = StaticCell::new();
-        // StaticCell::init() will return a &'static mut, which we then recast to &'static, because we only need a runtime initialization of a static variable, but don't require a mutable reference (in fact this might be problematic with a borrow checker)
-        let stack = &*STACK.init(Stack::new(
-            wifi_interface,
-            config,
-            RESOURCES.init(StackResources::new()),
-            seed,
-        ));
-
-        // Both tasks execute indefinitely, so they need to run in
-        // background tasks. First one (`connection`) establishes
-        // an L2 link and upon link break-down waits a bit and then
-        // tries to re-establish it. Second one (`net_task`) runs
-        // a network-loop, processing all networking related-events.
+        // `connection` establishes an L2 link and upon link break-down
+        // waits a bit and then tries to re-establish it
         spawner.spawn(connection(controller)).ok();
-        spawner.spawn(net_task(&stack)).ok();
 
-        // wait for the stack to obtain a valid IP configuration
-        // TODO: wrap this into select! together with a timeout
-        // and handle failure
-        stack.wait_config_up().await;
+        Self {
+            interface: Some(interface),
+        }
+    }
 
-        Self { stack: Some(stack) }
+    pub fn take(&mut self) -> Option<WifiDevice<'static, WifiStaDevice>> {
+        self.interface.take()
     }
 }
 
@@ -105,11 +84,4 @@ async fn connection(mut controller: WifiController<'static>) {
             }
         }
     }
-}
-
-// This is a diverging function, so it must be run on a separate task in
-// the background. It runs the network stack, processing network events.
-#[embassy_executor::task]
-async fn net_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
-    stack.run().await
 }
