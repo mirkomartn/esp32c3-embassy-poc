@@ -39,7 +39,7 @@ async fn main(spawner: Spawner) {
     // setup boot button handler
     boot_btn::start(&spawner, || println!("Hello button closure"));
 
-    let tsens = tsens::new();
+    let tsens = tsens::Tsens::new().await;
     let _wifi_link = wifi::WifiLink::new(
         &spawner,
         peripherals.SYSTIMER,

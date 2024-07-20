@@ -6,7 +6,7 @@ pub struct Tsens {
 }
 
 impl Tsens {
-    fn new() -> Self {
+    pub async fn new() -> Self {
         let tsens = Self {
             tsens_reg: unsafe { esp32c3::APB_SARADC::steal() },
             sys_reg: unsafe { esp32c3::SYSTEM::steal() },
@@ -27,6 +27,10 @@ impl Tsens {
             .perip_clk_en1()
             .write(|w| w.tsens_clk_en().set_bit());
 
+        // As per esp-idf implementation it's recommended to wait for
+        // 300ms for the sensor to settle, before reading it
+        Timer::after_millis(300).await;
+
         tsens
     }
 
@@ -45,8 +49,4 @@ impl Drop for Tsens {
             .perip_clk_en1()
             .write(|w| w.tsens_clk_en().clear_bit());
     }
-}
-
-pub fn new() -> Tsens {
-    Tsens::new()
 }
