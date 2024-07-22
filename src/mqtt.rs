@@ -33,7 +33,10 @@ impl<'a> MqttConnection<'a> {
             Ok(_) => MqttConnection::<'a> {
                 client: Some(client),
             },
-            Err(_) => MqttConnection::<'a> { client: None },
+            Err(e) => {
+                println!("failed to connect to broker!: {:?}", e);
+                MqttConnection::<'a> { client: None }
+            }
         }
     }
 
