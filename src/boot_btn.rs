@@ -11,6 +11,5 @@ async fn button_press(mut button: AnyInput<'static>, cb: impl Fn() + 'static) {
     loop {
         button.wait_for_rising_edge().await;
         cb();
-        println!("Zdravo Gasper!");
     }
 }
