@@ -1,5 +1,5 @@
 use crate::*;
-use esp_hal::{gpio::AnyInput, peripheral::Peripheral};
+use esp_hal::gpio::AnyInput;
 
 pub fn start(spawner: &Spawner, cb: impl Fn() + 'static) {
     let but = unsafe { AnyInput::new(esp_hal::gpio::Gpio9::steal(), esp_hal::gpio::Pull::Up) };
