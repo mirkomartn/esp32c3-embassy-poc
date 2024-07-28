@@ -1,6 +1,6 @@
 use crate::*;
 
-// use embassy_net::DhcpConfig;
+use embassy_net::DhcpConfig;
 use esp_wifi::wifi::{WifiDevice, WifiStaDevice};
 use static_cell::StaticCell;
 
@@ -10,19 +10,7 @@ pub struct NetStack {
 
 impl NetStack {
     pub async fn new(spawner: &Spawner, wifi_iface: WifiDevice<'static, WifiStaDevice>) -> Self {
-        // let config = Config::dhcpv4(Default::default());
-
-        let dns_servers = heapless::Vec::from_slice(&[embassy_net::Ipv4Address::new(1, 1, 1, 1)])
-            .ok()
-            .unwrap();
-        let address =
-            embassy_net::Ipv4Cidr::new(embassy_net::Ipv4Address::new(192, 168, 1, 88), 24);
-        let gateway = Some(embassy_net::Ipv4Address::new(192, 168, 1, 1));
-        let config = Config::ipv4_static(embassy_net::StaticConfigV4 {
-            address,
-            gateway,
-            dns_servers,
-        });
+        let config = Config::dhcpv4(Default::default());
 
         // the seed doesn't need to be cryptographically secure, it's used for
         // randomization of TCP port/initial sequence number, which helps prevent
@@ -49,7 +37,7 @@ impl NetStack {
         // and handle failure
         stack.wait_config_up().await;
 
-        println!("Config: {:?}", stack.config_v4().unwrap());
+        // println!("Config: {:?}", stack.config_v4().unwrap());
 
         Self { stack }
     }
